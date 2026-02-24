@@ -10,6 +10,16 @@ type User struct {
 	Password string        `bson:"password" json:"-"`
 }
 
+type RegisterInput struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
+type LoginInput struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
 type Todo struct {
 	ID        bson.ObjectID `bson:"_id,omitempty" json:"id"`
 	Title     string        `bson:"title" json:"title"`

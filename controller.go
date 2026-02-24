@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"time"
 
@@ -11,83 +12,115 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func Register(c *gin.Context, db *DB){
+func Register(c *gin.Context, db *DB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var user User
-	err := c.ShouldBindJSON(&user)
-	if err != nil{
-		c.JSON(500, gin.H{"error": err.Error()})
+	var input RegisterInput
+
+	// Bind & validate input
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
-	count, _ := db.Collection.CountDocuments(ctx, user.Email)
-	if count > 0 {
-		c.JSON(500, gin.H{"error": "Email Already Registered"})
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to hash password"})
-		return
-	}
-
-	user.ID = bson.ObjectID{}
-	user.Password = string(hashedPassword)
+	// Check if email already exists
+	count, err := db.Collection.CountDocuments(
+		ctx,
+		bson.M{"email": input.Email},
+	)
 	
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Database error",
+		})
+		return
+	}
+
+	if count > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Email already registered",
+		})
+		return
+	}
+
+	// Hash password
+	hashedPassword, err := bcrypt.GenerateFromPassword(
+		[]byte(input.Password),
+		bcrypt.DefaultCost,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to hash password",
+		})
+		return
+	}
+
+	// Create user model
+	user := User{
+		ID:       bson.NewObjectID(),
+		Email:    input.Email,
+		Password: string(hashedPassword),
+	}
+
+	// Insert into database
 	_, err = db.Collection.InsertOne(ctx, user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create user",
+		})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "User registered successfully"})
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "User registered successfully",
+	})
 }
 
-func Login(c *gin.Context, db *DB){
+func Login(c *gin.Context, db *DB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	
-	var input User
+	var input LoginInput
 	var user User
 
-	if err := c.ShouldBindJSON(&input); err != nil{
-		c.JSON(500, gin.H{"error": err.Error()})
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	err := db.Collection.FindOne(ctx, bson.M{"email" : input.Email}).Decode(&user)
-	if err != nil{
-		c.JSON(500, gin.H{"error": "Invalid email or password"})
+	err := db.Collection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&user)
+	if err != nil {
+		c.JSON(401, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password))
-	if err != nil{
-		c.JSON(500, gin.H{"error": "Invalid email or password"})
+	if err := bcrypt.CompareHashAndPassword(
+		[]byte(user.Password),
+		[]byte(input.Password),
+	); err != nil {
+		c.JSON(401, gin.H{"error": "Invalid email or password"})
 		return
 	}
+
+	secret := os.Getenv("JWT_SECRET")
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID.Hex(),
 		"email":   user.Email,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
 
-	secret := os.Getenv("JWT_SECRET")
 	tokenString, err := token.SignedString([]byte(secret))
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to generate token"})
+		c.JSON(500, gin.H{"error": "Token generation failed"})
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"token": tokenString,
-	})
+	c.JSON(200, gin.H{"token": tokenString})
 }
-
 
 func GetTodos(c *gin.Context, db *DB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -182,4 +215,3 @@ func DeleteTodo(c *gin.Context, db *DB) {
 
 	c.JSON(200, result)
 }
-
