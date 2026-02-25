@@ -18,7 +18,6 @@ func Register(c *gin.Context, db *DB) {
 
 	var input RegisterInput
 
-	// Bind & validate input
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -26,7 +25,6 @@ func Register(c *gin.Context, db *DB) {
 		return
 	}
 
-	// Check if email already exists
 	count, err := db.Collection.CountDocuments(
 		ctx,
 		bson.M{"email": input.Email},
@@ -46,11 +44,11 @@ func Register(c *gin.Context, db *DB) {
 		return
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword(
 		[]byte(input.Password),
 		bcrypt.DefaultCost,
 	)
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to hash password",
@@ -58,14 +56,12 @@ func Register(c *gin.Context, db *DB) {
 		return
 	}
 
-	// Create user model
 	user := User{
 		ID:       bson.NewObjectID(),
 		Email:    input.Email,
 		Password: string(hashedPassword),
 	}
 
-	// Insert into database
 	_, err = db.Collection.InsertOne(ctx, user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
